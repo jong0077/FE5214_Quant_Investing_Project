@@ -93,5 +93,10 @@ def technical_factors(high_df, low_df, adjusted_df):
 
     return factors
 
-
-
+def macro_factors(repo_series, yield_series, index):
+    macro_df = pd.DataFrame({
+        'repo': repo_series,
+        'tenyr': yield_series,
+    }).reindex(index).ffill().bfill().astype(float)
+    
+    return macro_df

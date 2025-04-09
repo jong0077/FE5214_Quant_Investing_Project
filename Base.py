@@ -13,8 +13,15 @@ from xgboost import XGBRegressor
 from RetrieveFactors import *
 
 class BaseStrategy:
-    def __init__(self, PriceData, HighData, LowData, VolumeData, IndustryMap, MomentumDaysList=[5, 21, 63], VolDays=21,
-                 ModelStartPeriod='2004-01-01', ModelEndPeriod='2020-12-31', cost_fn=None, benchmark=None):
+    def __init__(self, PriceData, HighData, LowData, VolumeData, IndustryMap,
+                 repo_aligned=None, ten_year_yield_aligned=None,
+                 MomentumDaysList=[5, 21, 63], VolDays=21,
+                 ModelStartPeriod='2004-01-01', ModelEndPeriod='2020-12-31',
+                 cost_fn=None, benchmark=None,
+                 use_macro=True, use_technical=True):
+
+        self.use_macro = use_macro
+        self.use_technical = use_technical
         self.price = PriceData
         self.volume = VolumeData
         self.price_volume = PriceData * VolumeData
@@ -45,6 +52,11 @@ class BaseStrategy:
             for m in MomentumDaysList
         }
 
+        if self.use_macro and repo_aligned is not None and ten_year_yield_aligned is not None:
+            self.macro_df = macro_factors(repo_aligned, ten_year_yield_aligned, self.price.index)
+        else:
+            self.macro_df = None
+
     def IndustryReturns(self):
         sector_returns = {}
         for industry, group in self.IndustryMap.groupby('Industry'):
@@ -53,20 +65,17 @@ class BaseStrategy:
         return sector_returns
 
     def get_all_factors(self):
-        if not hasattr(self, '_cached_tech_factors'):
-            self._cached_tech_factors = technical_factors(self.high, self.low, self.price)
-
-        # Existing factors
         factors = {f"v_{m}": self.normalized_returns[m] for m in self.MomentumDaysList}
         factors['vol'] = self.volatility_factor
         factors['volume'] = self.volume_factor
 
-        # Add cached technicals
-        factors['tech_BB_Pct'] = self._cached_tech_factors['BB_Pct']
-        factors['ATR'] = self._cached_tech_factors['ATR']
+        if self.use_technical:
+            if not hasattr(self, '_cached_tech_factors'):
+                self._cached_tech_factors = technical_factors(self.high, self.low, self.price)
+            factors['tech_BB_Pct'] = self._cached_tech_factors['BB_Pct']
+            factors['ATR'] = self._cached_tech_factors['ATR']
 
         return factors
-
     
     def multivariate_regression_beta(self, regression_type='linear'):
         start, end = self.ModelStartDate, self.ModelEndDate
@@ -84,6 +93,16 @@ class BaseStrategy:
             date_tp1 = dates[t + 1]
 
             factors = self.get_all_factors()
+
+            # Add macro factors as Series (broadcasted) only at runtime
+            if self.use_macro and self.macro_df is not None:
+                for name in self.macro_df.columns:
+                    val = self.macro_df.at[date_t, name]
+                    # Create Series with same index as one of the stock factor rows
+                    sample_index = next(iter(factors.values())).columns  # e.g., stock tickers
+                    macro_series = pd.Series(val, index=sample_index)
+                    factors[name] = macro_series.to_frame().T  # ensure it’s a row
+
             X_parts = [df.loc[date_t].rename(name) for name, df in factors.items()]
             X_df = pd.concat(X_parts, axis=1)
 
