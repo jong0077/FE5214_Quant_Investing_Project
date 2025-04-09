@@ -1,20 +1,16 @@
-import yfinance as yf
-from fredapi import Fred
-import pandas_datareader.data as web
-import matplotlib.pyplot as plt
 
 import tqdm
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
 
 from sklearn.linear_model import LinearRegression, Lasso
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.metrics import mean_squared_error, r2_score
 from xgboost import XGBRegressor
-
-from RetrieveFactorsFunction import *
+from RetrieveFactors import *
 
 class BaseStrategy:
     def __init__(self, PriceData, HighData, LowData, VolumeData, IndustryMap, MomentumDaysList=[5, 21, 63], VolDays=21,
@@ -172,7 +168,9 @@ class BaseStrategy:
         rebal_betas = beta_df.resample(rebalance_freq).mean()
         shifted_betas = rebal_betas.shift(1)  # keep NaNs; handle them in the loop
 
-        backtest_start = f'{start_year}-01-01'
+        all_dates = self.log_returns.index
+        target_date = pd.to_datetime(f'{start_year}-01-01')
+        backtest_start = all_dates[all_dates < target_date][-1]
         backtest_end = f'{end_year}-12-31'
         actual_returns = self.log_returns.loc[backtest_start:backtest_end]
         grouped = actual_returns.groupby(pd.Grouper(freq=rebalance_freq))
